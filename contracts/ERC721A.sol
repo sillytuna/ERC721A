@@ -40,6 +40,11 @@ contract ERC721A is IERC721A {
         address value;
     }
 
+    // Reference type for packed ownership.
+    struct PackedOwnershipRef {
+        uint256 value;
+    }
+
     struct OwnershipPartitionRef {
         address value;
     }
@@ -105,6 +110,11 @@ contract ERC721A is IERC721A {
     bytes private constant LOOKUP_TABLE_256 =
         hex'0001020903110a19042112290b311a3905412245134d2a550c5d32651b6d3a7506264262237d468514804e8d2b95569d0d495ea533a966b11c886eb93bc176c9071727374353637324837e9b47af86c7155181ad4fd18ed32c9096db57d59ee30e2e4a6a5f92a6be3498aae067ddb2eb1d5989b56fd7baf33ca0c2ee77e5caf7ff0810182028303840444c545c646c7425617c847f8c949c48a4a8b087b8c0c816365272829aaec650acd0d28fdad4e22d6991bd97dfdcea58b4d6f29fede4f6fe0f1f2f3f4b5b6b607b8b93a3a7b7bf357199c5abcfd9e168bcdee9b3f1ecf5fd1e3e5a7a8aa2b670c4ced8bbe8f0f4fc3d79a1c3cde7effb78cce6facbf9f8';
 
+    // Storage location for packedOwnerships.
+    // Equivalent to keccak256('com.erc721a.packedownership').
+    uint256 internal constant _PACKED_OWNERSHIP_STORAGE =
+        0x14d1d17051a21856adfcd8caa5ecfacc7e7d5e95e199d4bad2e93a5271be8b2d;
+
     // =============================================================
     //                            STORAGE
     // =============================================================
@@ -125,13 +135,15 @@ contract ERC721A is IERC721A {
     // An empty struct value does not necessarily mean the token is unowned.
     // See {_packedOwnershipOf} implementation for details.
     //
+    // Stored at _PACKED_OWNERSHIP_STORAGE and accessed via _packedOwnerships(uint256).
+    // Equivalent to mapping(uint256 => uint256) private _packedOwnerships;
+    //
     // Bits Layout:
     // - [0..159]   `addr`
     // - [160..223] `startTimestamp`
     // - [224]      `burned`
     // - [225]      `nextInitialized`
     // - [232..255] `extraData`
-    mapping(uint256 => uint256) private _packedOwnerships;
 
     // Mapping owner address to address data.
     //
@@ -343,16 +355,16 @@ contract ERC721A is IERC721A {
      * @dev Returns the unpacked `TokenOwnership` struct at `index`.
      */
     function _ownershipAt(uint256 index) internal view virtual returns (TokenOwnership memory) {
-        return _unpackedOwnership(_packedOwnerships[index]);
+        return _unpackedOwnership(_packedOwnerships(index).value);
     }
 
     /**
      * @dev Initializes the ownership slot minted at `index` for efficiency purposes.
      */
     function _initializeOwnershipAt(uint256 index) internal virtual {
-        if (_packedOwnerships[index] == 0) {
-            _packedOwnerships[index] = _packedOwnershipOf(index);
-            ownershipPartitionSet(index);
+        PackedOwnershipRef storage packedOwnership = _packedOwnerships(index);
+        if (packedOwnership.value == 0) {
+            packedOwnership.value = _packedOwnershipOf(index);
         }
     }
 
@@ -360,18 +372,69 @@ contract ERC721A is IERC721A {
      * Returns the packed ownership data of `tokenId`.
      */
     function _packedOwnershipOf(uint256 tokenId) private view returns (uint256) {
+        uint256 packed;
+        bytes memory table = LOOKUP_TABLE_256;
+        //IS UNCHECKED THIS NEEDED?
         unchecked {
-            if (_startTokenId() <= tokenId)
+            if (_startTokenId() <= tokenId) {
                 if (tokenId < _currentIndex) {
-                    uint256 packed = _packedOwnerships[tokenId];
+                    assembly {
+                        let slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
+                        packed := sload(slot)
 
-                    // If not burned.
-                    if (packed & _BITMASK_BURNED == 0) {
-                        if (packed == 0) packed = _packedOwnerships[_getBatchHead(tokenId - 1)];
-                        return packed;
+                        // If no data present, search for the batch head
+                        if iszero(packed) {
+                            //_packedOwnerships[_getBatchHead(tokenId - 1)];
+                            let bb
+                            tokenId := sub(tokenId, 1)
+
+                            //bucket = index >> 8;
+                            let bucket := shr(8, tokenId)
+                            // index within the bucket
+                            //uint256 bucketIndex = (index & 0xff);
+                            let bucketIndex := and(tokenId, 0xff)
+
+                            for {
+                                // load a bitboard from the bitmap.
+                                //uint256 bb = bitmap._data[bucket];
+                                slot := add(bucket, _OWNERSHIP_PARTITION_STORAGE)
+                                bb := sload(slot)
+                                // offset the bitboard to scan from `bucketIndex`.
+                                //bb = bb >> (0xff ^ bucketIndex); // bb >> (255 - bucketIndex)
+                                bb := shr(xor(0xff, bucketIndex), bb)
+                                if iszero(bb) {
+                                    bucketIndex := 255
+                                }
+                            } iszero(bb) {
+                                mstore(0, bucket)
+                                bb := sload(keccak256(0, 0x40))
+                            } {
+                                if iszero(bucket) {
+                                    revert(0, 0)
+                                }
+                                bucket := sub(bucket, 1)
+                                slot := sub(slot, 1)
+                            }
+
+                            //bb.bitScanForward256()
+                            bb := and(bb, sub(0, bb))
+                            bb := mul(bb, DEBRUIJN_256)
+                            bb := shr(248, bb)
+                            bb := mload(add(table, add(bb, 1)))
+                            bb := and(0xff, bb)
+                            //result = (bucket << 8) | (bucketIndex - bb.bitScanForward256());
+                            tokenId := or(shl(8, bucket), sub(bucketIndex, bb))
+
+                            slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
+                            packed := sload(slot)
+                        }
                     }
                 }
+            }
         }
+
+        // If not burned.
+        if (packed & _BITMASK_BURNED == 0) return packed;
 
         revert OwnerQueryForNonexistentToken();
     }
@@ -409,59 +472,69 @@ contract ERC721A is IERC721A {
         }
     }
 
+    /**
+     * @dev Returns the packedOwnership storage for `tokenId`.
+     * `tokenId` is used as an indexer into lengthless array.
+     */
+    function _packedOwnerships(uint256 tokenId) internal pure returns (PackedOwnershipRef storage po) {
+        assembly {
+            po.slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
+        }
+    }
+
     // =============================================================
     //                     OWNERSHIP PARTIIONING
     // =============================================================
 
-    /**
-     * @dev Returns the token id at the beginning of the batch
-     *  containing `tokenId`.
-     */
-    function _getBatchHead(uint256 tokenId) internal view returns (uint256 tokenIdBatchHead) {
-        uint256 result;
-        uint256 bb;
-        bytes memory table = LOOKUP_TABLE_256;
-        assembly {
-            //bucket = index >> 8;
-            let bucket := shr(8, tokenId)
-            // index within the bucket
-            //uint256 bucketIndex = (index & 0xff);
-            let bucketIndex := and(tokenId, 0xff)
+    ///**
+    // * @dev Returns the token id at the beginning of the batch
+    // *  containing `tokenId`.
+    // */
+    //function _getBatchHead(uint256 tokenId) internal view returns (uint256 tokenIdBatchHead) {
+    //    uint256 result;
+    //    uint256 bb;
+    //    bytes memory table = LOOKUP_TABLE_256;
+    //    assembly {
+    //        //bucket = index >> 8;
+    //        let bucket := shr(8, tokenId)
+    //        // index within the bucket
+    //        //uint256 bucketIndex = (index & 0xff);
+    //        let bucketIndex := and(tokenId, 0xff)
 
-            for {
-                // load a bitboard from the bitmap.
-                //uint256 bb = bitmap._data[bucket];
-                let slot := add(bucket, _OWNERSHIP_PARTITION_STORAGE)
-                bb := sload(slot)
-                // offset the bitboard to scan from `bucketIndex`.
-                //bb = bb >> (0xff ^ bucketIndex); // bb >> (255 - bucketIndex)
-                bb := shr(xor(0xff, bucketIndex), bb)
-                if iszero(bb) {
-                    bucketIndex := 255
-                }
-            } iszero(bb) {
-                mstore(0, bucket)
-                bb := sload(keccak256(0, 0x40))
-            } {
-                if iszero(bucket) {
-                    revert(0, 0)
-                }
-                bucket := sub(bucket, 1)
-                slot := sub(slot, 1)
-            }
+    //        for {
+    //            // load a bitboard from the bitmap.
+    //            //uint256 bb = bitmap._data[bucket];
+    //            let slot := add(bucket, _OWNERSHIP_PARTITION_STORAGE)
+    //            bb := sload(slot)
+    //            // offset the bitboard to scan from `bucketIndex`.
+    //            //bb = bb >> (0xff ^ bucketIndex); // bb >> (255 - bucketIndex)
+    //            bb := shr(xor(0xff, bucketIndex), bb)
+    //            if iszero(bb) {
+    //                bucketIndex := 255
+    //            }
+    //        } iszero(bb) {
+    //            mstore(0, bucket)
+    //            bb := sload(keccak256(0, 0x40))
+    //        } {
+    //            if iszero(bucket) {
+    //                revert(0, 0)
+    //            }
+    //            bucket := sub(bucket, 1)
+    //            slot := sub(slot, 1)
+    //        }
 
-            //bb.bitScanForward256()
-            bb := and(bb, sub(0, bb))
-            bb := mul(bb, DEBRUIJN_256)
-            bb := shr(248, bb)
-            bb := mload(add(table, add(bb, 1)))
-            bb := and(0xff, bb)
-            //result = (bucket << 8) | (bucketIndex - bb.bitScanForward256());
-            result := or(shl(8, bucket), sub(bucketIndex, bb))
-        }
+    //        //bb.bitScanForward256()
+    //        bb := and(bb, sub(0, bb))
+    //        bb := mul(bb, DEBRUIJN_256)
+    //        bb := shr(248, bb)
+    //        bb := mload(add(table, add(bb, 1)))
+    //        bb := and(0xff, bb)
+    //        //result = (bucket << 8) | (bucketIndex - bb.bitScanForward256());
+    //        result := or(shl(8, bucket), sub(bucketIndex, bb))
+    //    }
 
-        return result;
-    }
+    //    return result;
+    //}
 
     function ownershipPartitionSet(uint256 tokenId) internal {
         assembly {
@@ -564,7 +637,7 @@ contract ERC721A is IERC721A {
         return
             _startTokenId() <= tokenId &&
             tokenId < _currentIndex && // If within bounds,
-            _packedOwnerships[tokenId] & _BITMASK_BURNED == 0; // and not burned.
+            _packedOwnerships(tokenId).value & _BITMASK_BURNED == 0; // and not burned.
     }
 
     /**
@@ -654,14 +727,15 @@ contract ERC721A is IERC721A {
             ++_packedAddressData[to]; // Updates: `balance += 1`.
 
             // If this was previously empty, set the batch data.
-            if (_packedOwnerships[tokenId] == 0) ownershipPartitionSet(tokenId);
+            PackedOwnershipRef storage packedOwnership = _packedOwnerships(tokenId);
+            if (packedOwnership.value == 0) ownershipPartitionSet(tokenId);
 
             // Updates:
             // - `address` to the next owner.
             // - `startTimestamp` to the timestamp of transfering.
             // - `burned` to `false`.
             // - `nextInitialized` to `true`.
-            _packedOwnerships[tokenId] = _packOwnershipData(
+            packedOwnership.value = _packOwnershipData(
                 to,
                 _BITMASK_NEXT_INITIALIZED | _nextExtraData(from, to, prevOwnershipPacked)
             );
@@ -670,11 +744,14 @@ contract ERC721A is IERC721A {
             if (prevOwnershipPacked & _BITMASK_NEXT_INITIALIZED == 0) {
                 uint256 nextTokenId = tokenId + 1;
                 // If the next slot's address is zero and not burned (i.e. packed value is zero).
-                if (_packedOwnerships[nextTokenId] == 0) {
+                assembly {
+                    packedOwnership.slot := add(packedOwnership.slot, 1)
+                }
+                if (packedOwnership.value == 0) {
                     // If the next slot is within bounds.
                     if (nextTokenId != _currentIndex) {
                         // Initialize the next slot to maintain correctness for `ownerOf(tokenId + 1)`.
-                        _packedOwnerships[nextTokenId] = prevOwnershipPacked;
+                        packedOwnership.value = prevOwnershipPacked;
                         ownershipPartitionSet(nextTokenId);
                     }
                 }
@@ -837,7 +914,8 @@ contract ERC721A is IERC721A {
             // - `startTimestamp` to the timestamp of minting.
             // - `burned` to `false`.
             // - `nextInitialized` to `quantity == 1`.
-            _packedOwnerships[startTokenId] = _packOwnershipData(
+            PackedOwnershipRef storage packedOwnership = _packedOwnerships(startTokenId);
+            packedOwnership.value = _packOwnershipData(
                 to,
                 _nextInitializedFlag(quantity) | _nextExtraData(address(0), to, 0)
             );
@@ -919,7 +997,8 @@ contract ERC721A is IERC721A {
             // - `startTimestamp` to the timestamp of minting.
             // - `burned` to `false`.
             // - `nextInitialized` to `quantity == 1`.
-            _packedOwnerships[startTokenId] = _packOwnershipData(
+            PackedOwnershipRef storage packedOwnership = _packedOwnerships(startTokenId);
+            packedOwnership.value = _packOwnershipData(
                 to,
                 _nextInitializedFlag(quantity) | _nextExtraData(address(0), to, 0)
             );
@@ -1035,7 +1114,8 @@ contract ERC721A is IERC721A {
             // - `startTimestamp` to the timestamp of burning.
             // - `burned` to `true`.
             // - `nextInitialized` to `true`.
-            _packedOwnerships[tokenId] = _packOwnershipData(
+            PackedOwnershipRef storage packedOwnership = _packedOwnerships(tokenId);
+            packedOwnership.value = _packOwnershipData(
                 from,
                 (_BITMASK_BURNED | _BITMASK_NEXT_INITIALIZED) | _nextExtraData(from, address(0), prevOwnershipPacked)
             );
@@ -1044,11 +1124,14 @@ contract ERC721A is IERC721A {
             if (prevOwnershipPacked & _BITMASK_NEXT_INITIALIZED == 0) {
                 uint256 nextTokenId = tokenId + 1;
                 // If the next slot's address is zero and not burned (i.e. packed value is zero).
-                if (_packedOwnerships[nextTokenId] == 0) {
+                assembly {
+                    packedOwnership.slot := add(1, packedOwnership.slot)
+                }
+                if (packedOwnership.value == 0) {
                     // If the next slot is within bounds.
                     if (nextTokenId != _currentIndex) {
                         // Initialize the next slot to maintain correctness for `ownerOf(tokenId + 1)`.
-                        _packedOwnerships[nextTokenId] = prevOwnershipPacked;
+                        packedOwnership.value = prevOwnershipPacked;
                         ownershipPartitionSet(nextTokenId);
                     }
                 }
@@ -1072,7 +1155,8 @@ contract ERC721A is IERC721A {
      * @dev Directly sets the extra data for the ownership data `index`.
      */
     function _setExtraDataAt(uint256 index, uint24 extraData) internal virtual {
-        uint256 packed = _packedOwnerships[index];
+        PackedOwnershipRef storage packedOwnership = _packedOwnerships(index);
+        uint256 packed = packedOwnership.value;
         if (packed == 0) revert OwnershipNotInitializedForExtraData();
         uint256 extraDataCasted;
         // Cast `extraData` with assembly to avoid redundant masking.
@@ -1080,7 +1164,7 @@ contract ERC721A is IERC721A {
             extraDataCasted := extraData
         }
         packed = (packed & _BITMASK_EXTRA_DATA_COMPLEMENT) | (extraDataCasted << _BITPOS_EXTRA_DATA);
-        _packedOwnerships[index] = packed;
+        packedOwnership.value = packed;
     }
 
     /**
