@@ -4,6 +4,8 @@
 
 pragma solidity ^0.8.4;
 
+import 'hardhat/console.sol';
+import './BitMaps.sol';
 import './IERC721A.sol';
 
 /**
@@ -34,6 +36,8 @@ interface ERC721A__IERC721Receiver {
  * - The maximum token ID cannot exceed 2**256 - 1 (max value of uint256).
  */
 contract ERC721A is IERC721A {
+    using BitMaps for BitMaps.BitMap;
+
     // Reference type for token approval.
     struct TokenApprovalRef {
         address value;
@@ -132,6 +136,8 @@ contract ERC721A is IERC721A {
 
     // Mapping from owner to operator approvals
     mapping(address => mapping(address => bool)) private _operatorApprovals;
+
+    BitMaps.BitMap private _batchHead;
 
     // =============================================================
     //                          CONSTRUCTOR
@@ -337,6 +343,7 @@ contract ERC721A is IERC721A {
     function _initializeOwnershipAt(uint256 index) internal virtual {
         if (_packedOwnerships[index] == 0) {
             _packedOwnerships[index] = _packedOwnershipOf(index);
+            _batchHead.set(index);
         }
     }
 
@@ -344,30 +351,18 @@ contract ERC721A is IERC721A {
      * Returns the packed ownership data of `tokenId`.
      */
     function _packedOwnershipOf(uint256 tokenId) private view returns (uint256) {
-        uint256 curr = tokenId;
-
         unchecked {
-            if (_startTokenId() <= curr)
-                if (curr < _currentIndex) {
-                    uint256 packed = _packedOwnerships[curr];
+            if (_startTokenId() <= tokenId)
+                if (tokenId < _currentIndex) {
+                    uint256 packed = _packedOwnerships[tokenId];
                     // If not burned.
                     if (packed & _BITMASK_BURNED == 0) {
-                        // Invariant:
-                        // There will always be an initialized ownership slot
-                        // (i.e. `ownership.addr != address(0) && ownership.burned == false`)
-                        // before an unintialized ownership slot
-                        // (i.e. `ownership.addr == address(0) && ownership.burned == false`)
-                        // Hence, `curr` will not underflow.
-                        //
-                        // We can directly compare the packed value.
-                        // If the address is zero, packed will be zero.
-                        while (packed == 0) {
-                            packed = _packedOwnerships[--curr];
-                        }
+                        packed = _packedOwnerships[_batchHead.scanForward(tokenId)];
                         return packed;
                     }
                 }
         }
+
         revert OwnerQueryForNonexistentToken();
     }
 
@@ -402,6 +397,10 @@ contract ERC721A is IERC721A {
             // `(quantity == 1) << _BITPOS_NEXT_INITIALIZED`.
             result := shl(_BITPOS_NEXT_INITIALIZED, eq(quantity, 1))
         }
+    }
+
+    function _getBatchHead(uint256 tokenId) internal view returns (uint256 tokenIdBatchHead) {
+        tokenIdBatchHead = _batchHead.scanForward(tokenId);
     }
 
     // =============================================================
@@ -574,6 +573,9 @@ contract ERC721A is IERC721A {
             --_packedAddressData[from]; // Updates: `balance -= 1`.
             ++_packedAddressData[to]; // Updates: `balance += 1`.
 
+            // If this was previously empty, set the batch data.
+            if (_packedOwnerships[tokenId] == 0) _batchHead.set(tokenId);
+
             // Updates:
             // - `address` to the next owner.
             // - `startTimestamp` to the timestamp of transfering.
@@ -593,6 +595,7 @@ contract ERC721A is IERC721A {
                     if (nextTokenId != _currentIndex) {
                         // Initialize the next slot to maintain correctness for `ownerOf(tokenId + 1)`.
                         _packedOwnerships[nextTokenId] = prevOwnershipPacked;
+                        _batchHead.set(nextTokenId);
                     }
                 }
             }
@@ -758,6 +761,7 @@ contract ERC721A is IERC721A {
                 to,
                 _nextInitializedFlag(quantity) | _nextExtraData(address(0), to, 0)
             );
+            _batchHead.set(startTokenId);
 
             uint256 toMasked;
             uint256 end = startTokenId + quantity;
@@ -839,6 +843,7 @@ contract ERC721A is IERC721A {
                 to,
                 _nextInitializedFlag(quantity) | _nextExtraData(address(0), to, 0)
             );
+            _batchHead.set(startTokenId);
 
             emit ConsecutiveTransfer(startTokenId, startTokenId + quantity - 1, address(0), to);
 
@@ -945,6 +950,9 @@ contract ERC721A is IERC721A {
             // This is equivalent to `packed -= 1; packed += 1 << _BITPOS_NUMBER_BURNED;`.
             _packedAddressData[from] += (1 << _BITPOS_NUMBER_BURNED) - 1;
 
+            // If this was previously actual data, unset the batch data.
+            if (_packedOwnerships[tokenId] != 0) _batchHead.unset(tokenId);
+
             // Updates:
             // - `address` to the last owner.
             // - `startTimestamp` to the timestamp of burning.
@@ -964,6 +972,7 @@ contract ERC721A is IERC721A {
                     if (nextTokenId != _currentIndex) {
                         // Initialize the next slot to maintain correctness for `ownerOf(tokenId + 1)`.
                         _packedOwnerships[nextTokenId] = prevOwnershipPacked;
+                        _batchHead.set(nextTokenId);
                     }
                 }
             }
