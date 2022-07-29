@@ -1,4 +1,4 @@
-const { deployContract, getBlockTimestamp, mineBlockTimestamp, offsettedIndex } = require('./helpers.js');
+const { deployContract, getBlockTimestamp, mineBlockTimestamp, offsettedIndex } = require('../test/helpers.js');
 const { expect } = require('chai');
 const { BigNumber } = require('ethers');
 const { constants } = require('@openzeppelin/test-helpers');
@@ -403,10 +403,10 @@ const createTestSuite = ({ contract, constructorArgs }) =>
                 // prettier-ignore
                 await expect(
                   this.erc721a.connect(this.addr1)['safeTransferFrom(address,address,uint256)'](
-                      this.addr1.address,
-                      nonReceiver.address,
-                      offsetted(0)
-                    )
+                    this.addr1.address,
+                    nonReceiver.address,
+                    offsetted(0)
+                  )
                 ).to.be.revertedWith('TransferToNonERC721ReceiverImplementer');
               });
 
@@ -414,11 +414,11 @@ const createTestSuite = ({ contract, constructorArgs }) =>
                 // prettier-ignore
                 await expect(
                   this.erc721a.connect(this.addr1)['safeTransferFrom(address,address,uint256,bytes)'](
-                      this.addr1.address,
-                      this.receiver.address,
-                      offsetted(0),
-                      '0x01'
-                    )
+                    this.addr1.address,
+                    this.receiver.address,
+                    offsetted(0),
+                    '0x01'
+                  )
                 ).to.be.revertedWith('reverted in the receiver contract!');
               });
 
@@ -426,11 +426,11 @@ const createTestSuite = ({ contract, constructorArgs }) =>
                 // prettier-ignore
                 await expect(
                   this.erc721a.connect(this.addr1)['safeTransferFrom(address,address,uint256,bytes)'](
-                      this.addr1.address,
-                      this.receiver.address,
-                      offsetted(0),
-                      '0x02'
-                    )
+                    this.addr1.address,
+                    this.receiver.address,
+                    offsetted(0),
+                    '0x02'
+                  )
                 ).to.be.revertedWith('TransferToNonERC721ReceiverImplementer');
               });
             });
@@ -696,13 +696,13 @@ describe('ERC721A with ERC2309', async function () {
     this.erc721aMint10 = await deployContract('ERC721AWithERC2309Mock', args);
   });
 
-  it('emits a ConsecutiveTransfer event for single mint', async function () {    
+  it('emits a ConsecutiveTransfer event for single mint', async function () {
     expect(this.erc721aMint1.deployTransaction)
       .to.emit(this.erc721aMint1, 'ConsecutiveTransfer')
       .withArgs(0, 0, ZERO_ADDRESS, this.owner.address);
   });
 
-  it('emits a ConsecutiveTransfer event for a batch mint', async function () {    
+  it('emits a ConsecutiveTransfer event for a batch mint', async function () {
     expect(this.erc721aMint10.deployTransaction)
       .to.emit(this.erc721aMint10, 'ConsecutiveTransfer')
       .withArgs(0, 9, ZERO_ADDRESS, this.owner.address);

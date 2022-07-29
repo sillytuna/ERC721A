@@ -25,6 +25,30 @@ contract ERC721AGasReporterMock is ERC721A {
         _mint(to, 10);
     }
 
+    function transferFromFirst(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public {
+        transferFrom(from, to, tokenId);
+    }
+
+    function transferFromMiddle(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public {
+        transferFrom(from, to, tokenId);
+    }
+
+    function transferFromLast(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public {
+        transferFrom(from, to, tokenId);
+    }
+
     function transferTenAsc(address to) public {
         unchecked {
             transferFrom(msg.sender, to, 0);

@@ -156,7 +156,7 @@ library BitMaps {
     /**
      * @dev Find the closest index of the set bit before `index`.
      */
-    function scanForward(BitMap storage bitmap, uint256 index) internal view returns (uint256 bucket) {
+    function scanForward(BitMap storage bitmap, uint256 index) internal view returns (uint256) {
         //bucket = index >> 8;
 
         //// index within the bucket
@@ -190,14 +190,16 @@ library BitMaps {
         //        }
         //    }
         //}
+        //
+        // return real;
 
         uint256 result;
-        uint256 bucketIndex;
-        uint256 bb;
         bytes memory table = LOOKUP_TABLE_256;
         assembly {
+            let bucketIndex
+            let bb
             //bucket = index >> 8;
-            bucket := shr(8, index)
+            let bucket := shr(8, index)
             // index within the bucket
             //uint256 bucketIndex = (index & 0xff);
             bucketIndex := and(index, 0xff)

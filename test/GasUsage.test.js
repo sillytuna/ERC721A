@@ -49,6 +49,19 @@ describe('ERC721A Gas Usage', function () {
       await this.erc721a.mintOne(this.addr1.address);
     });
 
+    // TODO: Swap ten and one in transfer from to match old tests
+    //it('transfer to warm address with token 100 of batch', async function () {
+    //  await this.erc721a.connect(this.owner).transferFromLast(this.owner.address, this.addr1.address, 99);
+    //});
+
+    //it('transfer to warm address with token 50 of batch', async function () {
+    //  await this.erc721a.connect(this.owner).transferFromMiddle(this.owner.address, this.addr1.address, 49);
+    //});
+
+    //it('transfer to warm address with token 1 of batch', async function () {
+    //  await this.erc721a.connect(this.owner).transferFromFirst(this.owner.address, this.addr1.address, 0);
+    //});
+
     it('transfer to and from two addresses', async function () {
       for (let i = 0; i < 2; ++i) {
         await this.erc721a.connect(this.owner).transferFrom(this.owner.address, this.addr1.address, 1);
@@ -71,23 +84,23 @@ describe('ERC721A Gas Usage', function () {
 
   it('mintOneERC2309', async function () {
     // The following call `_mintERC3201` outside of contract creation.
-    // This is non-compliant with the ERC721 standard, 
+    // This is non-compliant with the ERC721 standard,
     // and is only meant for gas comparisons.
     let args = ['Azuki', 'AZUKI', this.owner.address, 0, false];
     let contract = await deployContract('ERC721AWithERC2309Mock', args);
     await contract.mintOneERC2309(this.owner.address);
     await contract.mintOneERC2309(this.owner.address);
-    await contract.mintOneERC2309(this.addr1.address); 
+    await contract.mintOneERC2309(this.addr1.address);
   });
 
   it('mintTenERC2309', async function () {
     // The following call `_mintERC3201` outside of contract creation.
-    // This is non-compliant with the ERC721 standard, 
+    // This is non-compliant with the ERC721 standard,
     // and is only meant for gas comparisons.
     let args = ['Azuki', 'AZUKI', this.owner.address, 0, false];
     let contract = await deployContract('ERC721AWithERC2309Mock', args);
     await contract.mintTenERC2309(this.owner.address);
     await contract.mintTenERC2309(this.owner.address);
-    await contract.mintTenERC2309(this.addr1.address);  
+    await contract.mintTenERC2309(this.addr1.address);
   });
 });

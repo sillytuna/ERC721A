@@ -374,67 +374,64 @@ contract ERC721A is IERC721A {
     function _packedOwnershipOf(uint256 tokenId) private view returns (uint256) {
         uint256 packed;
         bytes memory table = LOOKUP_TABLE_256;
-        //IS UNCHECKED THIS NEEDED?
-        unchecked {
-            if (_startTokenId() <= tokenId) {
-                if (tokenId < _currentIndex) {
-                    assembly {
-                        let slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
-                        packed := sload(slot)
 
-                        // If no data present, search for the batch head
-                        if iszero(packed) {
-                            //_packedOwnerships[_getBatchHead(tokenId - 1)];
-                            let bb
-                            tokenId := sub(tokenId, 1)
+        if (_startTokenId() <= tokenId) {
+            if (tokenId < _currentIndex) {
+                assembly {
+                    let slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
+                    packed := sload(slot)
 
-                            //bucket = index >> 8;
-                            let bucket := shr(8, tokenId)
-                            // index within the bucket
-                            //uint256 bucketIndex = (index & 0xff);
-                            let bucketIndex := and(tokenId, 0xff)
+                    // If no data present, search for the batch head
+                    if iszero(packed) {
+                        //_packedOwnerships[_getBatchHead(tokenId - 1)];
+                        let bb
+                        tokenId := sub(tokenId, 1)
 
-                            for {
-                                // load a bitboard from the bitmap.
-                                //uint256 bb = bitmap._data[bucket];
-                                slot := add(bucket, _OWNERSHIP_PARTITION_STORAGE)
-                                bb := sload(slot)
-                                // offset the bitboard to scan from `bucketIndex`.
-                                //bb = bb >> (0xff ^ bucketIndex); // bb >> (255 - bucketIndex)
-                                bb := shr(xor(0xff, bucketIndex), bb)
-                                if iszero(bb) {
-                                    bucketIndex := 255
-                                }
-                            } iszero(bb) {
-                                mstore(0, bucket)
-                                bb := sload(keccak256(0, 0x40))
-                            } {
-                                if iszero(bucket) {
-                                    revert(0, 0)
-                                }
-                                bucket := sub(bucket, 1)
-                                slot := sub(slot, 1)
+                        //bucket = index >> 8;
+                        let bucket := shr(8, tokenId)
+                        // index within the bucket
+                        //uint256 bucketIndex = (index & 0xff);
+                        let bucketIndex := and(tokenId, 0xff)
+
+                        for {
+                            // load a bitboard from the bitmap.
+                            //uint256 bb = bitmap._data[bucket];
+                            slot := add(bucket, _OWNERSHIP_PARTITION_STORAGE)
+                            bb := sload(slot)
+                            // offset the bitboard to scan from `bucketIndex`.
+                            //bb = bb >> (0xff ^ bucketIndex); // bb >> (255 - bucketIndex)
+                            bb := shr(xor(0xff, bucketIndex), bb)
+                            if iszero(bb) {
+                                bucketIndex := 255
                             }
-
-                            //bb.bitScanForward256()
-                            bb := and(bb, sub(0, bb))
-                            bb := mul(bb, DEBRUIJN_256)
-                            bb := shr(248, bb)
-                            bb := mload(add(table, add(bb, 1)))
-                            bb := and(0xff, bb)
-                            //result = (bucket << 8) | (bucketIndex - bb.bitScanForward256());
-                            tokenId := or(shl(8, bucket), sub(bucketIndex, bb))
-
-                            slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
-                            packed := sload(slot)
+                        } iszero(bb) {
+                            mstore(0, bucket)
+                            bb := sload(keccak256(0, 0x40))
+                        } {
+                            if iszero(bucket) {
+                                revert(0, 0)
+                            }
+                            bucket := sub(bucket, 1)
+                            slot := sub(slot, 1)
                         }
+
+                        //bb.bitScanForward256()
+                        bb := and(bb, sub(0, bb))
+                        bb := mul(bb, DEBRUIJN_256)
+                        bb := shr(248, bb)
+                        bb := mload(add(table, add(bb, 1)))
+                        bb := and(0xff, bb)
+                        //result = (bucket << 8) | (bucketIndex - bb.bitScanForward256());
+                        tokenId := or(shl(8, bucket), sub(bucketIndex, bb))
+
+                        slot := add(tokenId, _PACKED_OWNERSHIP_STORAGE)
+                        packed := sload(slot)
                     }
                 }
+                // If not burned.
+                if (packed & _BITMASK_BURNED == 0) return packed;
             }
         }
-
-        // If not burned.
-        if (packed & _BITMASK_BURNED == 0) return packed;
 
         revert OwnerQueryForNonexistentToken();
     }

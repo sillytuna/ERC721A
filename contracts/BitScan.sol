@@ -50,16 +50,11 @@ library BitScan {
     }
 
     /**
-        @dev Find the index of the lest significant set bit. (trailing zero count)
+        @dev Find the index of the least significant set bit. (trailing zero count)
      */
-    function bitScanForward256(uint256 bb) internal pure returns (uint256) {
-        //unchecked {
-        //    return uint8(LOOKUP_TABLE_256[(isolateLS1B256(bb) * DEBRUIJN_256) >> 248]);
-        //}
-
-        uint256 result;
-        bytes memory table = LOOKUP_TABLE_256;
+    function bitScanForward256(uint256 bb) internal pure returns (uint256 result) {
         //uint8(LOOKUP_TABLE_256[(isolateLS1B256(bb) * DEBRUIJN_256) >> 248]);
+        bytes memory table = LOOKUP_TABLE_256;
         assembly {
             bb := and(bb, sub(0, bb))
             bb := mul(bb, DEBRUIJN_256)
@@ -67,8 +62,6 @@ library BitScan {
             result := mload(add(table, add(bb, 1)))
             result := and(0xff, result)
         }
-
-        return result;
     }
 
     /**
